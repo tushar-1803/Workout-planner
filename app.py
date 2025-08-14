@@ -172,7 +172,11 @@ with st.sidebar:
     help="Enter this code to recreate a previous plan. Leave as-is for a new plan."
 )
 
-    include_videos = st.toggle("Show demo videos", value=False)
+    if "YT_API_KEY" in st.secrets and st.secrets["YT_API_KEY"]:
+        include_videos = st.toggle("Show demo videos", value=False)
+    else:
+        include_videos = False
+
     st.markdown("---")
     generate = st.button("🚀 Generate my plan", type="primary")
 
@@ -476,10 +480,9 @@ if generate:
                     if vid:
                         with st.expander("Watch demo"):
                             st.video(f"https://www.youtube.com/watch?v={vid}")
-                    else:
-                        st.caption("No embedded video found. Use the search link below.")
+
                 search_q = it["name"].replace(" ", "+") + "+exercise+proper+form+tutorial"
-                st.markdown(f"[Open on YouTube](https://www.youtube.com/results?search_query={search_q})")
+                st.markdown(f"[Search on YouTube for demo](https://www.youtube.com/results?search_query={search_q})")
 
     # Export tab
     with tabs[-1]:
