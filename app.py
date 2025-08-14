@@ -3,6 +3,9 @@ from typing import List, Dict, Optional, Tuple
 import streamlit as st
 import pandas as pd
 import numpy as np
+import numpy as np
+from sklearn.feature_extraction import DictVectorizer
+from typing import List, Dict, Optional
 
 # Try importing sklearn. If missing (e.g., before requirements install),
 # we'll fall back to a deterministic, simple selector.
