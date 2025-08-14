@@ -1,3 +1,6 @@
 streamlit
 pandas
 google-api-python-client
+scikit-learn
+numpy
+scipy
