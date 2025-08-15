@@ -3,9 +3,7 @@ from typing import List, Dict, Optional
 import streamlit as st
 import pandas as pd
 
-# ================================
-# App Config & Global Styles
-# ================================
+# App Config and Global Styles
 st.set_page_config(page_title="Custom Workout Planner", page_icon="💪", layout="wide")
 
 st.markdown("""
@@ -47,9 +45,9 @@ st.markdown(
 )
 st.write("")
 
-# ================================
+
 # Exercise Library
-# ================================
+
 # pattern: 'squat' | 'hinge' | 'lunge' | 'push' | 'vertical_push' | 'pull' | 'vertical_pull' | 'core' | 'carry' | 'mobility'
 # equipment: 'bodyweight', 'dumbbells', 'barbell', 'kettlebell', 'bands', 'pullup_bar', 'machines'
 # contraindications: 'knee', 'shoulder_overhead', 'lumbar_flexion', 'wrist', 'impact'
@@ -143,9 +141,8 @@ EXERCISES: List[Dict] = [
 
 LEVEL_ORDER = {"beginner": 0, "intermediate": 1, "advanced": 2}
 
-# ================================
 # Sidebar Inputs
-# ================================
+
 with st.sidebar:
     st.markdown("### Your Setup")
     st.caption("Tell us about your training. We’ll build the plan.")
@@ -190,9 +187,9 @@ with st.sidebar:
     st.markdown("---")
     generate = st.button("🚀 Generate my plan", type="primary")
 
-# ================================
-# Helpers
-# ================================
+
+# Helper Functions
+
 def _norm_equip(e: List[str]) -> List[str]:
     m = {
         "Bodyweight": "bodyweight", "Dumbbells": "dumbbells", "Barbell": "barbell",
@@ -605,9 +602,9 @@ def summarize_day(day_items: List[Dict]) -> Dict:
     patterns = [x["pattern"] for x in day_items if x.get("pattern")]
     return {"total_sets": total_sets, "est_min": round(est_time/60), "patterns": ", ".join(sorted(set(patterns)))}
 
-# ================================
+
 # UI Flow
-# ================================
+
 if 'generated_once' not in st.session_state:
     st.info("Use the panel on the left to set your goal and schedule, then hit **Generate my plan**.")
 
