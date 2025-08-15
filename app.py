@@ -417,30 +417,22 @@ def estimate_exercise_time_sec(item: Dict) -> int:
 
 
 @st.cache_data(show_spinner=False)
-def get_youtube_id(query: str, api_key: Optional[str]) -> Optional[str]:
-    """Return a YouTube videoId or None. Cached per (query, api_key)."""
+def get_youtube_id(query: str) -> Optional[str]:
+    api_key = st.secrets.get("YT_API_KEY", None)
     if not api_key:
         return None
     try:
         from googleapiclient.discovery import build
-    except ModuleNotFoundError:
-        # Package not installed on server (requirements.txt issue)
-        st.info("YouTube client not installed on this deploy (check requirements.txt).")
-        return None
-    try:
         yt = build("youtube", "v3", developerKey=api_key)
-        req = yt.search().list(
-            q=query, part="id", type="video", maxResults=1, videoEmbeddable="true"
-        )
+        req = yt.search().list(q=query, part="id", type="video", maxResults=1, videoEmbeddable="true")
         res = req.execute()
         items = res.get("items", [])
         if items:
             return items[0]["id"]["videoId"]
     except Exception:
-        # Keep the UI friendly; avoid leaking details
         st.info("Couldn't fetch YouTube video automatically. You can still use the search links.")
+        return None
     return None
-
 
 def pick_for_pattern(candidates: List[Dict], pattern: str, used: set, rng: random.Random) -> Optional[Dict]:
     pool = [e for e in candidates if e["pattern"] == pattern and e["name"] not in used]
