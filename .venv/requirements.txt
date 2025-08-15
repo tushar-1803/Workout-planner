@@ -3,3 +3,4 @@ pandas
 google-api-python-client
 numpy
 scikit-learn
+google-api-python-client>=2.130.0
