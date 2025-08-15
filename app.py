@@ -3,12 +3,11 @@ from typing import List, Dict, Optional
 import streamlit as st
 import pandas as pd
 
-
-# App Config
-
+# ================================
+# App Config & Global Styles
+# ================================
 st.set_page_config(page_title="Custom Workout Planner", page_icon="💪", layout="wide")
 
-# Global Styles & Hero
 st.markdown("""
 <style>
 /* page width + padding */
@@ -25,6 +24,7 @@ st.markdown("""
 /* badges */
 .badge {display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#1C2541;
   margin-right:.35rem; font-size:.8rem; color:#E6EDF3; border:1px solid rgba(255,255,255,.06);}
+.badge + .badge {margin-left:.25rem;}
 /* cards */
 .card {border-radius:16px; padding:14px 16px; background:#1C2541; border:1px solid rgba(255,255,255,.06); margin-bottom:10px;}
 .card h4{margin:0 0 .25rem 0; font-size:1rem;}
@@ -33,17 +33,23 @@ st.markdown("""
 .stDownloadButton button, .stButton button {border-radius:999px; padding:.6rem 1rem; font-weight:700;}
 /* sidebar spacing */
 [data-testid="stSidebar"] .block-container {padding-top: 1rem;}
+/* captions a bit brighter */
+.css-1q1n0ol, .stMarkdown p small, .stMarkdown em {color:#9FB0C3;}
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="hero-title">Custom Workout Planner</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-sub">Build a weekly plan around <b>your</b> goal, time, and equipment. Toggle videos for quick exercise demos.</div>', unsafe_allow_html=True)
-st.markdown('<span class="badge">💪 Strength</span><span class="badge">🌟 Hypertrophy</span><span class="badge">🔥 Conditioning</span><span class="badge">🧘 Mobility</span>', unsafe_allow_html=True)
+st.markdown(
+    '<span class="badge">💪 Strength</span><span class="badge">🌟 Hypertrophy</span>'
+    '<span class="badge">🔥 Conditioning</span><span class="badge">🧘 Mobility</span>',
+    unsafe_allow_html=True
+)
 st.write("")
 
-
+# ================================
 # Exercise Library
-
+# ================================
 # pattern: 'squat' | 'hinge' | 'lunge' | 'push' | 'vertical_push' | 'pull' | 'vertical_pull' | 'core' | 'carry' | 'mobility'
 # equipment: 'bodyweight', 'dumbbells', 'barbell', 'kettlebell', 'bands', 'pullup_bar', 'machines'
 # contraindications: 'knee', 'shoulder_overhead', 'lumbar_flexion', 'wrist', 'impact'
@@ -137,12 +143,13 @@ EXERCISES: List[Dict] = [
 
 LEVEL_ORDER = {"beginner": 0, "intermediate": 1, "advanced": 2}
 
-
-# Sidebar Inputs (user-first copy)
-
+# ================================
+# Sidebar Inputs
+# ================================
 with st.sidebar:
     st.markdown("### Your Setup")
     st.caption("Tell us about your training. We’ll build the plan.")
+
     goal = st.selectbox(
         "Primary goal",
         ["Build Muscle (Hypertrophy)", "Get Stronger (Strength)", "Fat Loss / Conditioning", "General Fitness / Health", "Mobility / Flexibility"],
@@ -167,10 +174,10 @@ with st.sidebar:
         default=["Full Body"]
     )
     seed = st.number_input(
-    "Plan Code",
-    min_value=0, max_value=10_000, value=42, step=1,
-    help="Enter this code to recreate a previous plan. Leave as-is for a new plan."
-)
+        "Plan Code",
+        min_value=0, max_value=10_000, value=42, step=1,
+        help="Enter this code to recreate a previous plan. Leave as-is for a new plan."
+    )
 
     if "YT_API_KEY" in st.secrets and st.secrets["YT_API_KEY"]:
         include_videos = st.toggle("Show demo videos", value=False)
@@ -180,9 +187,9 @@ with st.sidebar:
     st.markdown("---")
     generate = st.button("🚀 Generate my plan", type="primary")
 
-
+# ================================
 # Helpers
-
+# ================================
 def _norm_equip(e: List[str]) -> List[str]:
     m = {
         "Bodyweight": "bodyweight", "Dumbbells": "dumbbells", "Barbell": "barbell",
@@ -203,6 +210,7 @@ def _contra_from_constraints(c: List[str]) -> List[str]:
     return list({mapping[x] for x in c})
 
 def filter_exercises(goal_key: str, equip_norm: List[str], min_level: str, avoid: List[str]) -> List[Dict]:
+    """Fix: Enforce level/equipment/contra + goal intent (except allow 'general'/'mobility' always)."""
     level_min = LEVEL_ORDER[min_level]
     out = []
     for ex in EXERCISES:
@@ -212,15 +220,31 @@ def filter_exercises(goal_key: str, equip_norm: List[str], min_level: str, avoid
             continue
         if any(a in ex["contra"] for a in avoid):
             continue
-        if goal_key not in ex["goal_tags"] and goal_key not in ["general", "mobility"]:
-            pass
+        if goal_key not in ["general", "mobility"] and goal_key not in ex["goal_tags"]:
+            continue
         out.append(ex)
     return out
 
-def emphasize(exs: List[Dict], focus: List[str]) -> List[Dict]:
+def difficulty_weight(ex: Dict, experience: str) -> int:
+    """Weight exercises by appropriateness for the user's level."""
+    w = 1
+    lvl = LEVEL_ORDER[ex["level_min"]]
+    if experience == "Beginner":
+        w += 2 if lvl == 0 else 0
+        w -= 1 if lvl >= 1 else 0
+    elif experience == "Intermediate":
+        w += 1 if lvl == 1 else 0
+    else:  # Advanced
+        w += 2 if lvl >= 1 else 0
+        if "barbell" in ex["equipment"] and ex["pattern"] in ["squat", "hinge", "push", "pull", "vertical_push", "vertical_pull"]:
+            w += 1
+    return max(1, w)
+
+def emphasize(exs: List[Dict], focus: List[str], experience: str) -> List[Dict]:
+    """Compose difficulty weighting with user emphasis."""
     weighted = []
     for e in exs:
-        w = 1
+        w = difficulty_weight(e, experience)
         if "Lower Body" in focus and e["pattern"] in ["squat", "hinge", "lunge"]:
             w += 1
         if "Upper Body" in focus and e["pattern"] in ["push", "vertical_push", "pull", "vertical_pull"]:
@@ -237,11 +261,12 @@ def emphasize(exs: List[Dict], focus: List[str]) -> List[Dict]:
             w += 1
         if "Chest" in focus and e["pattern"] == "push":
             w += 1
-        weighted.extend([e] * w)
+        weighted.extend([e] * max(1, w))
     return weighted
 
 def patterns_for_week(days: int, goal_key: str) -> List[List[str]]:
-    TEMPLATES = {
+    """Goal-aware daily pattern lists with deduping."""
+    base_map = {
         1: [["squat", "hinge", "push", "pull", "core"]],
         2: [["squat", "push", "pull", "core"], ["hinge", "push", "pull", "core"]],
         3: [["squat", "push", "pull", "core"], ["hinge", "push", "pull", "core"], ["lunge", "push", "pull", "core"]],
@@ -249,7 +274,8 @@ def patterns_for_week(days: int, goal_key: str) -> List[List[str]]:
         5: [["upper"], ["lower"], ["push"], ["pull"], ["legs"]],
         6: [["push"], ["pull"], ["legs"], ["upper"], ["lower"], ["core"]],
     }
-    base = TEMPLATES[days].copy()
+    base = base_map[days][:]
+
     expanded = []
     for day in base:
         day_patterns = []
@@ -264,6 +290,17 @@ def patterns_for_week(days: int, goal_key: str) -> List[List[str]]:
                 day_patterns += ["core", "carry"]
             else:
                 day_patterns.append(p)
+
+        # goal bias
+        if goal_key == "strength":
+            day_patterns += ["carry"]  # bracing
+        elif goal_key == "hypertrophy":
+            day_patterns += ["push", "pull"]  # extra pump
+        elif goal_key in ["fatloss", "endurance"]:
+            day_patterns += ["carry", "core"]  # circuit-friendly
+        elif goal_key == "mobility":
+            day_patterns = ["mobility", "core", "hinge", "squat"]
+
         uniq = []
         for x in day_patterns:
             if x not in uniq:
@@ -272,44 +309,112 @@ def patterns_for_week(days: int, goal_key: str) -> List[List[str]]:
     return expanded
 
 def scheme_for(goal_key: str, pattern: str, experience: str, minutes: int) -> Dict:
-    sets = 3
-    reps = 10
-    rest = 60
+    """Different schemes by goal + level with Tempo & RIR."""
     notes = ""
+    tempo = "2-0-2"
+    rir = 2
+    rest = 75
+    sets = 3
+    reps = "8–10"
 
     if goal_key == "strength":
         if pattern in ["squat", "hinge", "push", "pull", "vertical_push", "vertical_pull"]:
-            sets, reps, rest = 4, 5, 120
-            notes = "Heavy but crisp reps. Leave 1–2 reps in reserve."
+            sets, reps, rest = 4, "3–5", 150
+            tempo, rir = "2-1-1", 2
+            notes = "Power focus, crisp technique."
         else:
-            sets, reps, rest = 3, 6, 90
-            notes = "Controlled tempo; prioritize quality."
+            sets, reps, rest = 3, "5–6", 120
+            tempo, rir = "2-1-1", 1
     elif goal_key == "hypertrophy":
-        sets, reps, rest = 3, 10, 75
-        notes = "Last 2–3 reps challenging with good form."
+        sets, reps, rest = 3, "8–12", 75
+        tempo, rir = "3-1-2", 1
+        notes = "Challenging last reps, full range."
     elif goal_key in ["fatloss", "endurance"]:
-        return {"type": "timed", "time_sec": 40, "rest_sec": 20, "sets": 3, "reps": None,
-                "notes": "Move briskly. Circuit style; repeat all exercises for 3 rounds."}
+        return {
+            "type": "timed", "time_sec": 40, "rest_sec": 20, "sets": 3, "reps": None,
+            "tempo": "constant", "rir": None,
+            "notes": "Circuit pace; keep moving between exercises."
+        }
     elif goal_key == "mobility":
-        return {"type": "hold", "time_sec": 45, "rest_sec": 15, "sets": 2, "reps": None,
-                "notes": "Slow, controlled range. Breathe."}
+        return {
+            "type": "hold", "time_sec": 45, "rest_sec": 15, "sets": 2, "reps": None,
+            "tempo": "slow", "rir": None,
+            "notes": "Controlled range, breathe into end positions."
+        }
     else:  # general
-        sets, reps, rest = 3, 8, 90
-        notes = "Smooth reps, full range."
+        sets, reps, rest = 3, "6–10", 90
+        tempo, rir = "2-1-2", 2
+        notes = "Smooth reps, own the range."
 
+    # Level-based adjustments
     if experience == "Beginner":
         sets = max(2, sets - 1)
         rest = max(60, rest - 15)
+        if isinstance(reps, str) and "–" in reps:
+            lo, hi = [int(x) for x in reps.split("–")]
+            reps = f"{lo+1}–{hi+2}"
+        tempo = "2-0-2"
+        rir = 2
+        notes = (notes + " Leave 2–3 reps in reserve.").strip()
     elif experience == "Advanced":
         sets += 1
         rest += 15
+        if isinstance(reps, str) and "–" in reps:
+            lo, hi = [int(x) for x in reps.split("–")]
+            reps = f"{max(3, lo-1)}–{max(lo, hi-1)}"
+        tempo = "3-1-1" if goal_key in ["hypertrophy", "general"] else "2-1-1"
+        rir = 1
+        notes = (notes + " Optionally add a final hard set.").strip()
 
+    # Time-pressure adjustment
     if minutes < 35:
         sets = max(2, sets - 1)
     elif minutes > 60:
         sets += 1
 
-    return {"type": "sets_reps", "sets": sets, "reps": reps, "time_sec": None, "rest_sec": rest, "notes": notes}
+    return {
+        "type": "sets_reps",
+        "sets": sets,
+        "reps": reps,
+        "time_sec": None,
+        "rest_sec": rest,
+        "tempo": tempo,
+        "rir": rir,
+        "notes": notes
+    }
+
+def _avg_reps(reps_field) -> int:
+    if isinstance(reps_field, int):
+        return reps_field
+    if isinstance(reps_field, str) and "–" in reps_field:
+        lo, hi = [int(x) for x in reps_field.split("–")]
+        return (lo + hi) // 2
+    return 10
+
+def estimate_exercise_time_sec(item: Dict) -> int:
+    """Estimate work + rest + overhead per exercise (more realistic)."""
+    # Timed/holds: unchanged except a bigger transition
+    if item["type"] == "timed":
+        return (item["time_sec"] + item["rest_sec"]) * item["sets"] + 45
+    if item["type"] == "hold":
+        return (item["time_sec"] + item["rest_sec"]) * item["sets"] + 45
+
+    # Sets x (reps * tempo seconds + per-set overhead) + rest between sets + transition
+    reps = _avg_reps(item["reps"])
+    try:
+        ecc, pause, con = [int(x) for x in str(item.get("tempo", "2-0-2")).split("-")]
+    except Exception:
+        ecc, pause, con = 2, 0, 2
+
+    time_per_rep = ecc + pause + con
+    per_set_overhead = 12     # extra seconds per set (setup, unracking, small adjustments)
+    transition_between_exercises = 45  # moving to next station, loading, notes
+
+    work = (reps * time_per_rep + per_set_overhead) * item["sets"]
+    rest_total = max(0, item["sets"] - 1) * item.get("rest_sec", 75)
+
+    return work + rest_total + transition_between_exercises
+
 
 @st.cache_data(show_spinner=False)
 def get_youtube_id(query: str) -> Optional[str]:
@@ -339,28 +444,94 @@ def pick_for_pattern(candidates: List[Dict], pattern: str, used: set, rng: rando
     used.add(choice["name"])
     return choice
 
-def build_day_plan(candidates: List[Dict], patterns: List[str], rng: random.Random, goal_key: str, experience: str, minutes: int):
+def build_day_plan(candidates: List[Dict], patterns: List[str], rng: random.Random,
+                   goal_key: str, experience: str, minutes: int):
+    """Time-aware builder with per-level min/max exercise caps (warm-up not counted)."""
     used = set()
     day_exercises = []
-    target = 5
-    if minutes < 35:
-        target = 4
-    elif minutes > 60:
-        target = 6
+    time_budget = minutes * 60
+    time_used = 0
+
+    # Level-based caps (excluding the warm-up block)
+    caps = {
+        "Beginner":      {"min": 4, "max": 6},
+        "Intermediate":  {"min": 5, "max": 7},
+        "Advanced":      {"min": 5, "max": 8},
+    }
+    cap = caps.get(experience, {"min": 5, "max": 7})
+
+    def count_main(exs):
+        return sum(1 for x in exs if x.get("name") != "Warm-up")
+
+    # Warm-up (5 min-ish)
+    warmup = {
+        "name": "Warm-up",
+        "pattern": "mobility",
+        "type": "hold",
+        "time_sec": 30,
+        "rest_sec": 15,
+        "sets": 6,
+        "tempo": "easy",
+        "rir": None,
+        "notes": "3–5 min: light cardio + dynamic mobility (hips, T-spine, shoulders). Add 2 ramp sets for your first big lift."
+    }
+    time_used += estimate_exercise_time_sec(warmup)
+    day_exercises.append(warmup)
+
+    # Cover core patterns in order (prioritize at least 3 main lifts when relevant)
     for p in patterns:
+        if count_main(day_exercises) >= cap["max"]:
+            break
         ex = pick_for_pattern(candidates, p, used, rng)
-        if ex:
-            scheme = scheme_for(goal_key, ex["pattern"], experience, minutes)
-            day_exercises.append({**ex, **scheme})
-            if len(day_exercises) >= target:
-                break
-    while len(day_exercises) < target and candidates:
+        if not ex:
+            continue
+        scheme = scheme_for(goal_key, ex["pattern"], experience, minutes)
+        item = {**ex, **scheme}
+        t = estimate_exercise_time_sec(item)
+
+        must_have = (goal_key in ["strength", "hypertrophy", "general"]) and \
+                    (sum(1 for x in day_exercises if x.get("type") == "sets_reps") < 3)
+
+        # Include first 3 lifts even if tight; otherwise respect time budget
+        if must_have or time_used + t <= time_budget:
+            day_exercises.append(item)
+            time_used += t
+        if count_main(day_exercises) >= cap["max"]:
+            break
+
+    # Fill remaining time up to caps
+    tries = 0
+    while time_used <= time_budget and tries < 30 and count_main(day_exercises) < cap["max"]:
         ex = pick_for_pattern(candidates, rng.choice(patterns), used, rng)
         if not ex:
             break
-        scheme = scheme_for(goal_key, ex["pattern"], experience, minutes)
-        day_exercises.append({**ex, **scheme})
+        item = {**ex, **scheme_for(goal_key, ex["pattern"], experience, minutes)}
+        t = estimate_exercise_time_sec(item)
+        if time_used + t > time_budget:
+            break
+        day_exercises.append(item)
+        time_used += t
+        tries += 1
+
+    # If we somehow didn't reach the minimum (e.g., very short budget), try to pad up to min
+    tries = 0
+    while count_main(day_exercises) < cap["min"] and tries < 10:
+        ex = pick_for_pattern(candidates, rng.choice(patterns), used, rng)
+        if not ex:
+            break
+        item = {**ex, **scheme_for(goal_key, ex["pattern"], experience, minutes)}
+        t = estimate_exercise_time_sec(item)
+        # if adding would overflow badly, still add 1 more to meet the minimum
+        if time_used + t > time_budget and count_main(day_exercises) >= (cap["min"] - 1):
+            day_exercises.append(item)
+            break
+        if time_used + t <= time_budget:
+            day_exercises.append(item)
+            time_used += t
+        tries += 1
+
     return day_exercises
+
 
 def goal_key_from_label(lbl: str) -> str:
     m = {
@@ -377,6 +548,7 @@ def plan_to_dataframe(week_plan: Dict[int, List[Dict]], include_video_urls: bool
     for day_idx, items in week_plan.items():
         day_name = f"Day {day_idx+1}"
         for it in items:
+            # Skip warm-up row in export? Keep it; it's useful.
             if it["type"] == "sets_reps":
                 scheme = f'{it["sets"]} x {it["reps"]}'
                 rest = it["rest_sec"]
@@ -387,7 +559,7 @@ def plan_to_dataframe(week_plan: Dict[int, List[Dict]], include_video_urls: bool
                 scheme = f'{it["sets"]} x {it["time_sec"]}s'
                 rest = it["rest_sec"]
             video = ""
-            if include_video_urls:
+            if include_video_urls and it["name"] != "Warm-up":
                 vid = get_youtube_id(f"{it['name']} exercise proper form tutorial")
                 if vid:
                     video = f"https://www.youtube.com/watch?v={vid}"
@@ -397,6 +569,8 @@ def plan_to_dataframe(week_plan: Dict[int, List[Dict]], include_video_urls: bool
                 "Pattern": it["pattern"],
                 "Scheme": scheme,
                 "Rest (s)": rest,
+                "Tempo": it.get("tempo", ""),
+                "RIR": it.get("rir", ""),
                 "Notes": it.get("notes", ""),
                 "Video": video
             })
@@ -415,16 +589,26 @@ def markdown_plan(week_plan: Dict[int, List[Dict]], include_videos: bool) -> str
             else:
                 scheme = f'{it["sets"]} x {it["time_sec"]}s — rest {it["rest_sec"]}s'
             vid = ""
-            if include_videos:
+            if include_videos and it["name"] != "Warm-up":
                 v = get_youtube_id(f"{it['name']} exercise proper form tutorial")
                 if v:
                     vid = f"  \n[Demo](https://www.youtube.com/watch?v={v})"
-            lines.append(f"- **{it['name']}** ({it['pattern']}) — {scheme}. {it.get('notes','')}{vid}")
+            extras = []
+            if it.get("tempo"): extras.append(f"Tempo {it['tempo']}")
+            if it.get("rir") is not None: extras.append(f"RIR {it['rir']}")
+            extras_txt = (" — " + " · ".join(extras)) if extras else ""
+            lines.append(f"- **{it['name']}** ({it['pattern']}) — {scheme}.{extras_txt} {it.get('notes','')}{vid}")
     return "\n".join(lines)
 
+def summarize_day(day_items: List[Dict]) -> Dict:
+    total_sets = sum(x["sets"] for x in day_items if x["type"] == "sets_reps")
+    est_time = sum(estimate_exercise_time_sec(x) for x in day_items)
+    patterns = [x["pattern"] for x in day_items if x.get("pattern")]
+    return {"total_sets": total_sets, "est_min": round(est_time/60), "patterns": ", ".join(sorted(set(patterns)))}
 
+# ================================
 # UI Flow
-
+# ================================
 if 'generated_once' not in st.session_state:
     st.info("Use the panel on the left to set your goal and schedule, then hit **Generate my plan**.")
 
@@ -442,11 +626,16 @@ if generate:
         st.stop()
 
     patterns_week = patterns_for_week(days, goal_key)
-    week_plan = {}
+    week_plan: Dict[int, List[Dict]] = {}
+
+    # Build per-day with deterministic RNG based on (seed, day_index)
     for i, patterns in enumerate(patterns_week):
-        cand_weighted = emphasize(candidates, focus)
-        day = build_day_plan(cand_weighted, patterns, rng, goal_key, experience, minutes)
+        # Combine seed and day index into a single supported seed type
+        day_rng = random.Random(seed * 1000 + i)
+        cand_weighted = emphasize(candidates, focus, experience)
+        day = build_day_plan(cand_weighted, patterns, day_rng, goal_key, experience, minutes)
         week_plan[i] = day
+
 
     st.success("Plan generated! Scroll down to view your week.")
 
@@ -456,7 +645,11 @@ if generate:
     for i in range(days):
         with tabs[i]:
             st.subheader(f"Day {i+1}")
+
             day_items = week_plan[i]
+            summary = summarize_day(day_items)
+            st.caption(f"**Summary:** {summary['total_sets']} total sets · ~{summary['est_min']} min · Patterns: {summary['patterns']}")
+
             for j, it in enumerate(day_items, start=1):
                 header = f"{j}. {it['name']} · <small>{it['pattern']}</small>"
                 if it["type"] == "sets_reps":
@@ -466,23 +659,31 @@ if generate:
                 else:
                     scheme_txt = f"Holds: {it['sets']} × {it['time_sec']}s · Rest {it['rest_sec']}s"
 
+                tempo = it.get("tempo")
+                rir = it.get("rir")
+                extra = []
+                if tempo: extra.append(f"Tempo {tempo}")
+                if rir is not None: extra.append(f"RIR {rir}")
+                extras = " · ".join(extra)
+
                 st.markdown(f'''
 <div class="card">
   <h4>{header}</h4>
-  <div>{scheme_txt}</div>
+  <div>{scheme_txt}{(" · " + extras) if extras else ""}</div>
   <small>{it.get('notes','')}</small>
 </div>
 ''', unsafe_allow_html=True)
 
-                # Video + search link
-                if include_videos:
+                # Video + search link (limit auto-fetch to first 2 non-warm-up exercises)
+                if include_videos and it["name"] != "Warm-up" and j <= 3:
                     vid = get_youtube_id(f"{it['name']} exercise proper form tutorial")
                     if vid:
                         with st.expander("Watch demo"):
                             st.video(f"https://www.youtube.com/watch?v={vid}")
 
-                search_q = it["name"].replace(" ", "+") + "+exercise+proper+form+tutorial"
-                st.markdown(f"[Search on YouTube for demo](https://www.youtube.com/results?search_query={search_q})")
+                if it["name"] != "Warm-up":
+                    search_q = it["name"].replace(" ", "+") + "+exercise+proper+form+tutorial"
+                    st.markdown(f"[Search on YouTube for demo](https://www.youtube.com/results?search_query={search_q})")
 
     # Export tab
     with tabs[-1]:
