@@ -60,7 +60,7 @@ EXERCISES: List[Dict] = [
     {"name": "Goblet Squat", "pattern": "squat", "equipment": ["dumbbells"], "level_min": "beginner",
      "contra": ["knee"], "goal_tags": ["strength", "hypertrophy", "general"]},
     {"name": "Bodyweight Squat", "pattern": "squat", "equipment": ["bodyweight"], "level_min": "beginner",
-     "contra": ["knee"], "goal_tags": ["general", "fatloss", "endurance"]},
+      "contra": ["knee"], "goal_tags": ["general", "fatloss", "endurance"]},
     {"name": "Romanian Deadlift", "pattern": "hinge", "equipment": ["barbell", "dumbbells"], "level_min": "beginner",
      "contra": ["lumbar_flexion"], "goal_tags": ["strength", "hypertrophy", "general"]},
     {"name": "Conventional Deadlift", "pattern": "hinge", "equipment": ["barbell"], "level_min": "intermediate",
@@ -179,10 +179,13 @@ with st.sidebar:
         help="Enter this code to recreate a previous plan. Leave as-is for a new plan."
     )
 
-    if "YT_API_KEY" in st.secrets and st.secrets["YT_API_KEY"]:
-        include_videos = st.toggle("Show demo videos", value=False)
-    else:
-        include_videos = False
+    # --- YouTube key + toggle + cache refresh ---
+    YT_KEY = st.secrets.get("YT_API_KEY")
+    has_key = bool(YT_KEY)
+    include_videos = st.toggle("Show demo videos", value=False) if has_key else False
+    if st.button("🔁 Refresh videos cache"):
+        st.cache_data.clear()
+        st.success("Cleared cached video lookups.")
 
     st.markdown("---")
     generate = st.button("🚀 Generate my plan", type="primary")
@@ -393,13 +396,11 @@ def _avg_reps(reps_field) -> int:
 
 def estimate_exercise_time_sec(item: Dict) -> int:
     """Estimate work + rest + overhead per exercise (more realistic)."""
-    # Timed/holds: unchanged except a bigger transition
     if item["type"] == "timed":
         return (item["time_sec"] + item["rest_sec"]) * item["sets"] + 45
     if item["type"] == "hold":
         return (item["time_sec"] + item["rest_sec"]) * item["sets"] + 45
 
-    # Sets x (reps * tempo seconds + per-set overhead) + rest between sets + transition
     reps = _avg_reps(item["reps"])
     try:
         ecc, pause, con = [int(x) for x in str(item.get("tempo", "2-0-2")).split("-")]
@@ -407,31 +408,35 @@ def estimate_exercise_time_sec(item: Dict) -> int:
         ecc, pause, con = 2, 0, 2
 
     time_per_rep = ecc + pause + con
-    per_set_overhead = 12     # extra seconds per set (setup, unracking, small adjustments)
-    transition_between_exercises = 45  # moving to next station, loading, notes
+    per_set_overhead = 12
+    transition_between_exercises = 45
 
     work = (reps * time_per_rep + per_set_overhead) * item["sets"]
     rest_total = max(0, item["sets"] - 1) * item.get("rest_sec", 75)
 
     return work + rest_total + transition_between_exercises
 
-
 @st.cache_data(show_spinner=False)
-def get_youtube_id(query: str) -> Optional[str]:
-    api_key = st.secrets.get("YT_API_KEY", None)
+def get_youtube_id(query: str, api_key: Optional[str]) -> Optional[str]:
+    """Return a YouTube videoId or None. Cached per (query, api_key)."""
     if not api_key:
         return None
     try:
         from googleapiclient.discovery import build
+    except ModuleNotFoundError:
+        st.info("YouTube client not installed on this deploy (check requirements.txt).")
+        return None
+    try:
         yt = build("youtube", "v3", developerKey=api_key)
-        req = yt.search().list(q=query, part="id", type="video", maxResults=1, videoEmbeddable="true")
+        req = yt.search().list(
+            q=query, part="id", type="video", maxResults=1, videoEmbeddable="true"
+        )
         res = req.execute()
         items = res.get("items", [])
         if items:
             return items[0]["id"]["videoId"]
     except Exception:
         st.info("Couldn't fetch YouTube video automatically. You can still use the search links.")
-        return None
     return None
 
 def pick_for_pattern(candidates: List[Dict], pattern: str, used: set, rng: random.Random) -> Optional[Dict]:
@@ -452,7 +457,6 @@ def build_day_plan(candidates: List[Dict], patterns: List[str], rng: random.Rand
     time_budget = minutes * 60
     time_used = 0
 
-    # Level-based caps (excluding the warm-up block)
     caps = {
         "Beginner":      {"min": 4, "max": 6},
         "Intermediate":  {"min": 5, "max": 7},
@@ -463,7 +467,7 @@ def build_day_plan(candidates: List[Dict], patterns: List[str], rng: random.Rand
     def count_main(exs):
         return sum(1 for x in exs if x.get("name") != "Warm-up")
 
-    # Warm-up (5 min-ish)
+    # Warm-up block (~5 min)
     warmup = {
         "name": "Warm-up",
         "pattern": "mobility",
@@ -478,7 +482,7 @@ def build_day_plan(candidates: List[Dict], patterns: List[str], rng: random.Rand
     time_used += estimate_exercise_time_sec(warmup)
     day_exercises.append(warmup)
 
-    # Cover core patterns in order (prioritize at least 3 main lifts when relevant)
+    # Cover core patterns first
     for p in patterns:
         if count_main(day_exercises) >= cap["max"]:
             break
@@ -492,7 +496,6 @@ def build_day_plan(candidates: List[Dict], patterns: List[str], rng: random.Rand
         must_have = (goal_key in ["strength", "hypertrophy", "general"]) and \
                     (sum(1 for x in day_exercises if x.get("type") == "sets_reps") < 3)
 
-        # Include first 3 lifts even if tight; otherwise respect time budget
         if must_have or time_used + t <= time_budget:
             day_exercises.append(item)
             time_used += t
@@ -513,7 +516,7 @@ def build_day_plan(candidates: List[Dict], patterns: List[str], rng: random.Rand
         time_used += t
         tries += 1
 
-    # If we somehow didn't reach the minimum (e.g., very short budget), try to pad up to min
+    # Ensure minimum count if possible
     tries = 0
     while count_main(day_exercises) < cap["min"] and tries < 10:
         ex = pick_for_pattern(candidates, rng.choice(patterns), used, rng)
@@ -521,7 +524,6 @@ def build_day_plan(candidates: List[Dict], patterns: List[str], rng: random.Rand
             break
         item = {**ex, **scheme_for(goal_key, ex["pattern"], experience, minutes)}
         t = estimate_exercise_time_sec(item)
-        # if adding would overflow badly, still add 1 more to meet the minimum
         if time_used + t > time_budget and count_main(day_exercises) >= (cap["min"] - 1):
             day_exercises.append(item)
             break
@@ -531,7 +533,6 @@ def build_day_plan(candidates: List[Dict], patterns: List[str], rng: random.Rand
         tries += 1
 
     return day_exercises
-
 
 def goal_key_from_label(lbl: str) -> str:
     m = {
@@ -548,7 +549,6 @@ def plan_to_dataframe(week_plan: Dict[int, List[Dict]], include_video_urls: bool
     for day_idx, items in week_plan.items():
         day_name = f"Day {day_idx+1}"
         for it in items:
-            # Skip warm-up row in export? Keep it; it's useful.
             if it["type"] == "sets_reps":
                 scheme = f'{it["sets"]} x {it["reps"]}'
                 rest = it["rest_sec"]
@@ -560,7 +560,7 @@ def plan_to_dataframe(week_plan: Dict[int, List[Dict]], include_video_urls: bool
                 rest = it["rest_sec"]
             video = ""
             if include_video_urls and it["name"] != "Warm-up":
-                vid = get_youtube_id(f"{it['name']} exercise proper form tutorial")
+                vid = get_youtube_id(f"{it['name']} exercise proper form tutorial", YT_KEY)
                 if vid:
                     video = f"https://www.youtube.com/watch?v={vid}"
             rows.append({
@@ -574,8 +574,7 @@ def plan_to_dataframe(week_plan: Dict[int, List[Dict]], include_video_urls: bool
                 "Notes": it.get("notes", ""),
                 "Video": video
             })
-    df = pd.DataFrame(rows)
-    return df
+    return pd.DataFrame(rows)
 
 def markdown_plan(week_plan: Dict[int, List[Dict]], include_videos: bool) -> str:
     lines = ["# Weekly Workout Plan"]
@@ -590,7 +589,7 @@ def markdown_plan(week_plan: Dict[int, List[Dict]], include_videos: bool) -> str
                 scheme = f'{it["sets"]} x {it["time_sec"]}s — rest {it["rest_sec"]}s'
             vid = ""
             if include_videos and it["name"] != "Warm-up":
-                v = get_youtube_id(f"{it['name']} exercise proper form tutorial")
+                v = get_youtube_id(f"{it['name']} exercise proper form tutorial", YT_KEY)
                 if v:
                     vid = f"  \n[Demo](https://www.youtube.com/watch?v={v})"
             extras = []
@@ -630,12 +629,10 @@ if generate:
 
     # Build per-day with deterministic RNG based on (seed, day_index)
     for i, patterns in enumerate(patterns_week):
-        # Combine seed and day index into a single supported seed type
         day_rng = random.Random(seed * 1000 + i)
         cand_weighted = emphasize(candidates, focus, experience)
         day = build_day_plan(cand_weighted, patterns, day_rng, goal_key, experience, minutes)
         week_plan[i] = day
-
 
     st.success("Plan generated! Scroll down to view your week.")
 
@@ -674,9 +671,9 @@ if generate:
 </div>
 ''', unsafe_allow_html=True)
 
-                # Video + search link (limit auto-fetch to first 2 non-warm-up exercises)
+                # Video + search link (limit auto-fetch to first 3 non-warm-up exercises)
                 if include_videos and it["name"] != "Warm-up" and j <= 3:
-                    vid = get_youtube_id(f"{it['name']} exercise proper form tutorial")
+                    vid = get_youtube_id(f"{it['name']} exercise proper form tutorial", YT_KEY)
                     if vid:
                         with st.expander("Watch demo"):
                             st.video(f"https://www.youtube.com/watch?v={vid}")
